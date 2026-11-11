@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Personal LLM</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #272b35;
+    --text: #e6e8ec;
+    --muted: #8a8f99;
+    --accent: #4f8cff;
+    --user-bubble: #22304a;
+    --assistant-bubble: #1e2129;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header span.status {
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 760px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .msg {
+    padding: 10px 14px;
+    border-radius: 10px;
+    line-height: 1.45;
+    max-width: 80%;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .user {
+    align-self: flex-end;
+    background: var(--user-bubble);
+  }
+  .assistant {
+    align-self: flex-start;
+    background: var(--assistant-bubble);
+    border: 1px solid var(--border);
+  }
+  form {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    max-width: 760px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  textarea {
+    flex: 1;
+    resize: none;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0 18px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+</style>
+</head>
+<body>
+  <header>
+    <div>Personal LLM Gateway</div>
+    <span class="status" id="status">checking…</span>
+  </header>
+  <div id="messages"></div>
+  <form id="form">
+    <textarea id="input" rows="1" placeholder="Send a message…"></textarea>
+    <button id="send" type="submit">Send</button>
+  </form>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const form = document.getElementById('form');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const statusEl = document.getElementById('status');
+
+let conversationId = localStorage.getItem('conversation_id');
+
+function addMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    const j = await r.json();
+    statusEl.textContent = j.worker && j.worker.status === 'ok' ? 'worker ready' : 'worker unreachable';
+  } catch {
+    statusEl.textContent = 'gateway unreachable';
+  }
+}
+checkHealth();
+
+async function loadHistory() {
+  if (!conversationId) return;
+  try {
+    const r = await fetch('/conversations/' + conversationId);
+    if (!r.ok) return;
+    const j = await r.json();
+    for (const m of j.messages) {
+      if (m.role === 'user' || m.role === 'assistant') addMessage(m.role, m.content);
+    }
+  } catch {}
+}
+loadHistory();
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  sendBtn.disabled = true;
+
+  addMessage('user', text);
+  const assistantDiv = addMessage('assistant', '');
+
+  try {
+    const resp = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, conversation_id: conversationId ? Number(conversationId) : null }),
+    });
+
+    const newConvId = resp.headers.get('X-Conversation-Id');
+    if (newConvId) {
+      conversationId = newConvId;
+      localStorage.setItem('conversation_id', conversationId);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6);
+        if (raw === '[DONE]') continue;
+        try {
+          const chunk = JSON.parse(raw);
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (delta) {
+            assistantDiv.textContent += delta;
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+        } catch {}
+      }
+    }
+  } catch (err) {
+    assistantDiv.textContent = '[error: ' + err.message + ']';
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+});
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+</script>
+</body>
+</html>

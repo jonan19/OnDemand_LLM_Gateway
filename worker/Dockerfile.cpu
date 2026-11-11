@@ -1,0 +1,38 @@
+# CPU-only worker image. Fast local build/test loop (no GPU passthrough needed).
+# Use Dockerfile.cuda for the GPU variant intended for Kaggle/RunPod.
+FROM ubuntu:24.04
+
+ARG LLAMA_RELEASE=b11960
+ARG LLAMA_ASSET=llama-${LLAMA_RELEASE}-bin-ubuntu-x64.tar.gz
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl libgomp1 libssl3 libstdc++6 libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/llama.cpp
+RUN curl -fsSL -o llama.tar.gz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_RELEASE}/${LLAMA_ASSET}" \
+    && tar -xzf llama.tar.gz \
+    && mv llama-${LLAMA_RELEASE} bin \
+    && rm llama.tar.gz
+
+ENV PATH="/opt/llama.cpp/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/llama.cpp/bin" \
+    LLAMA_CACHE="/models" \
+    MODEL_REPO="TheBloke/Mistral-7B-Instruct-v0.2-GGUF" \
+    MODEL_QUANT="Q4_K_M" \
+    CTX_SIZE="4096" \
+    N_GPU_LAYERS="0" \
+    HOST="0.0.0.0" \
+    PORT="8080"
+
+COPY start.sh /opt/llama.cpp/start.sh
+RUN chmod +x /opt/llama.cpp/start.sh
+
+VOLUME ["/models"]
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=10 \
+    CMD curl -fsS "http://localhost:${PORT}/health" || exit 1
+
+ENTRYPOINT ["/opt/llama.cpp/start.sh"]

@@ -1,0 +1,18 @@
+# Large/downloaded binaries - fetch via README instead of committing
+llama.cpp/
+models/*.gguf
+models/download.log
+
+# Python
+gateway/venv/
+__pycache__/
+*.pyc
+
+# Runtime data / logs
+gateway/gateway.db
+gateway/gateway.log
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

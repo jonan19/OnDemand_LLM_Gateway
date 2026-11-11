@@ -1,0 +1,46 @@
+# GPU worker image for Kaggle / RunPod / Vast.ai (real NVIDIA GPU required at `docker run` time
+# via --gpus all + the NVIDIA Container Toolkit on the host; RunPod/Vast.ai templates provide this
+# already). Uses llama.cpp's redistributable "cudart" asset instead of the full nvidia/cuda base
+# image, so the image stays smaller -- the host's NVIDIA driver is still required, just not the
+# full CUDA toolkit inside the image.
+FROM ubuntu:24.04
+
+ARG LLAMA_RELEASE=b11960
+ARG CUDA_TAG=cuda-12.8
+ARG LLAMA_ASSET=llama-${LLAMA_RELEASE}-bin-ubuntu-${CUDA_TAG}-x64.tar.gz
+ARG CUDART_ASSET=cudart-llama-${LLAMA_RELEASE}-bin-ubuntu-${CUDA_TAG}-x64.tar.gz
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl libgomp1 libssl3 libstdc++6 libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/llama.cpp
+RUN curl -fsSL -o llama.tar.gz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_RELEASE}/${LLAMA_ASSET}" \
+    && curl -fsSL -o cudart.tar.gz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_RELEASE}/${CUDART_ASSET}" \
+    && mkdir -p bin \
+    && tar -xzf llama.tar.gz -C bin --strip-components=1 \
+    && tar -xzf cudart.tar.gz -C bin --strip-components=1 \
+    && rm llama.tar.gz cudart.tar.gz
+
+ENV PATH="/opt/llama.cpp/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/llama.cpp/bin" \
+    LLAMA_CACHE="/models" \
+    MODEL_REPO="TheBloke/Mistral-7B-Instruct-v0.2-GGUF" \
+    MODEL_QUANT="Q4_K_M" \
+    CTX_SIZE="8192" \
+    N_GPU_LAYERS="999" \
+    HOST="0.0.0.0" \
+    PORT="8080"
+
+COPY start.sh /opt/llama.cpp/start.sh
+RUN chmod +x /opt/llama.cpp/start.sh
+
+VOLUME ["/models"]
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=10 \
+    CMD curl -fsS "http://localhost:${PORT}/health" || exit 1
+
+ENTRYPOINT ["/opt/llama.cpp/start.sh"]
