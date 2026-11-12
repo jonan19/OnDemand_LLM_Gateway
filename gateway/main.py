@@ -1,4 +1,5 @@
 import json
+import os
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
@@ -8,8 +9,11 @@ import httpx
 
 import storage
 
-WORKER_URL = "http://127.0.0.1:8080"
-SLIDING_WINDOW_TURNS = 10  # last N stored messages injected into each prompt
+# Config comes from environment variables (see .env.example). Run with:
+#   uvicorn main:app --env-file .env
+WORKER_URL = os.getenv("WORKER_URL", "http://127.0.0.1:8080").rstrip("/")
+SLIDING_WINDOW_TURNS = int(os.getenv("SLIDING_WINDOW_TURNS", "10"))  # last N stored messages sent per prompt
+DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", "256"))
 
 app = FastAPI(title="Personal LLM Gateway")
 storage.init_db()
@@ -17,7 +21,7 @@ storage.init_db()
 
 class ChatRequest(BaseModel):
     message: str
-    max_tokens: int = 256
+    max_tokens: int = DEFAULT_MAX_TOKENS
     conversation_id: int | None = None
 
 
@@ -26,7 +30,12 @@ async def health():
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get(f"{WORKER_URL}/health", timeout=5)
-            return {"gateway": "ok", "worker": r.json()}
+            try:
+                worker = r.json()
+            except ValueError:
+                # Something answered, but it isn't a llama-server health response.
+                worker = {"error": f"non-JSON response (HTTP {r.status_code})"}
+            return {"gateway": "ok", "worker": worker}
         except httpx.RequestError:
             return {"gateway": "ok", "worker": "unreachable"}
 

@@ -4,7 +4,8 @@ models/*.gguf
 models/download.log
 
 # Python
-gateway/venv/
+venv/
+.venv/
 __pycache__/
 *.pyc
 
@@ -16,3 +17,6 @@ gateway/gateway.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets
+.env
