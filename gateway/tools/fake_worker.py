@@ -1,11 +1,11 @@
 """A fake llama-server for local testing, no model or GPU needed.
 
-    python -m tools.fake_worker                      # listens on 127.0.0.1:8081
+    python -m tools.fake_worker                      # listens on 127.0.0.1:8080, /health answers 200 immediately
     python -m tools.fake_worker --load-delay 20      # /health answers 503 for the first 20s (cold start)
     python -m tools.fake_worker --token-delay 0.3    # slower streaming
     python -m tools.fake_worker --fail-after 3       # drop the connection after 3 tokens (mid-stream crash)
 
-Then point the gateway at it: WORKER_URL=http://127.0.0.1:8081 in gateway/.env (port 8081 because
+Then point the gateway at it: WORKER_URL=http://127.0.0.1:8080 in gateway/.env (port 8080 because
 8080 is taken by Apache on the dev machine). Run from the gateway/ folder.
 
 It mimics the parts of llama-server the gateway uses:
