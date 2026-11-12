@@ -33,6 +33,15 @@ def init_db() -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS worker_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            state TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -130,3 +139,25 @@ def list_conversations() -> list[dict]:
         }
         for r in rows
     ]
+
+
+def get_worker_state() -> str | None:
+    """The last persisted worker state ('idle'/'starting'/'ready'), or None if never saved."""
+    conn = get_connection()
+    row = conn.execute("SELECT state FROM worker_state WHERE id = 1").fetchone()
+    conn.close()
+    return row["state"] if row else None
+
+
+def set_worker_state(state: str) -> None:
+    """Persist the worker state. There is exactly one row; this overwrites it."""
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO worker_state (id, state, updated_at) VALUES (1, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at
+        """,
+        (state, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+    conn.close()

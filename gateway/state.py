@@ -16,6 +16,7 @@ This module has no I/O. Persisting the state (task 4.10) and acting on transitio
 """
 import time
 from enum import Enum
+from typing import Callable
 
 
 class WorkerState(str, Enum):
@@ -39,8 +40,15 @@ class InvalidTransition(Exception):
 
 
 class WorkerStateMachine:
-    def __init__(self, initial: WorkerState = WorkerState.IDLE, clock=time.monotonic):
+    def __init__(
+        self,
+        initial: WorkerState = WorkerState.IDLE,
+        clock=time.monotonic,
+        on_change: Callable[[WorkerState, WorkerState], None] | None = None,
+    ):
+        """`on_change(previous, new)` runs after every successful transition (used for persistence)."""
         self._clock = clock
+        self._on_change = on_change
         self._state = initial
         self._since = clock()
 
@@ -63,6 +71,8 @@ class WorkerStateMachine:
         previous = self._state
         self._state = new
         self._since = self._clock()
+        if self._on_change is not None:
+            self._on_change(previous, new)
         return previous
 
     # Readable shortcuts for the events the lifecycle code will actually fire.
@@ -74,3 +84,26 @@ class WorkerStateMachine:
 
     def mark_idle(self) -> WorkerState:
         return self.transition(WorkerState.IDLE)
+
+
+def persistent_machine(
+    load: Callable[[], str | None],
+    save: Callable[[str], None],
+    clock=time.monotonic,
+) -> WorkerStateMachine:
+    """A state machine that survives gateway restarts (task 4.10).
+
+    `load()` returns the last saved state string or None; `save(state)` stores it. In the gateway
+    these are storage.get_worker_state / storage.set_worker_state. An unknown or missing saved
+    value starts at IDLE. Every successful transition is saved.
+
+    A restored STARTING or READY is only what the gateway *believed* before it stopped; the worker
+    may be gone. Callers should check the worker's /health on startup and call mark_idle() if it
+    does not answer (done in Phase 5 when the lifecycle is wired up).
+    """
+    saved = load()
+    try:
+        initial = WorkerState(saved) if saved is not None else WorkerState.IDLE
+    except ValueError:
+        initial = WorkerState.IDLE
+    return WorkerStateMachine(initial=initial, clock=clock, on_change=lambda _prev, new: save(new.value))
