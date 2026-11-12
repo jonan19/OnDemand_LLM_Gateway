@@ -2,7 +2,7 @@ import json
 import os
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
@@ -40,6 +40,11 @@ async def health():
             return {"gateway": "ok", "worker": "unreachable"}
 
 
+@app.get("/conversations")
+async def list_conversations():
+    return {"conversations": storage.list_conversations()}
+
+
 @app.post("/conversations")
 async def new_conversation():
     conversation_id = storage.create_conversation()
@@ -48,6 +53,11 @@ async def new_conversation():
 
 @app.get("/conversations/{conversation_id}")
 async def conversation_history(conversation_id: int):
+    if not storage.conversation_exists(conversation_id):
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"code": "not_found", "message": "Conversation not found", "retryable": False}},
+        )
     return {"messages": storage.get_full_history(conversation_id)}
 
 

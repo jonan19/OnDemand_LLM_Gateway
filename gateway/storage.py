@@ -99,3 +99,34 @@ def get_full_history(conversation_id: int) -> list[dict]:
         {"role": r["role"], "content": r["content"], "created_at": r["created_at"]}
         for r in rows
     ]
+
+
+def list_conversations() -> list[dict]:
+    """All conversations, most recently active first (empty ones use created_at)."""
+    conn = get_connection()
+    rows = conn.execute(
+        """
+        SELECT c.id,
+               c.created_at,
+               COALESCE(MAX(m.created_at), c.created_at) AS last_message_at,
+               COUNT(m.id) AS message_count,
+               (SELECT content FROM messages
+                WHERE conversation_id = c.id AND role = 'user'
+                ORDER BY id ASC LIMIT 1) AS first_user_message
+        FROM conversations c
+        LEFT JOIN messages m ON m.conversation_id = c.id
+        GROUP BY c.id
+        ORDER BY last_message_at DESC, c.id DESC
+        """
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "id": r["id"],
+            "created_at": r["created_at"],
+            "last_message_at": r["last_message_at"],
+            "message_count": r["message_count"],
+            "preview": (r["first_user_message"] or "")[:60],
+        }
+        for r in rows
+    ]
